@@ -378,7 +378,7 @@ export async function checkHealth(): Promise<any> {
     const response = await esClient.get(`${ES_HOST}/_cluster/health`);
     return response.data;
   } catch (error) {
-    console.error("[Elasticsearch] Health check failed:", (error as Error).message);
+    console.error("[Elasticsearch] Health check failed:", error);
     return null;
   }
 }

@@ -20,12 +20,12 @@ RUN npm run build
 RUN npm prune --production
 
 # Production stage
-FROM node:22.21.1-alpine
+FROM node:22.21.1-slim
 
 WORKDIR /app
 
 # Install Python for any runtime needs (if required)
-RUN apk add --no-cache python3 py3-pip
+RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
 COPY package*.json ./
