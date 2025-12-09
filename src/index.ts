@@ -47,7 +47,10 @@ async function initializeRAGSystem(): Promise<boolean> {
     // Check Elasticsearch health
     const esHealth = await checkHealth();
     if (esHealth) {
-      console.log("[RAG Service] Elasticsearch is healthy:", esHealth.status);
+      console.log(
+        "[RAG Service] Elasticsearch is healthy:",
+        esHealth.cluster_name || esHealth.name || "Connected"
+      );
 
       // Create Elasticsearch index
       await createElasticsearchIndex();
@@ -96,7 +99,9 @@ app.get("/health", async (_req: Request, res: Response) => {
 
     // Check Elasticsearch
     const esHealth = await checkHealth();
-    const esStatus = esHealth ? esHealth.status : "disconnected";
+    const esStatus = esHealth
+      ? esHealth.cluster_name || esHealth.name || "connected"
+      : "disconnected";
 
     res.json({
       status: "running",

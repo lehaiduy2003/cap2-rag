@@ -3,10 +3,13 @@
  */
 
 import axios, { AxiosError } from "axios";
+import dotenv from "dotenv";
 
-const ES_HOST = process.env.ES_HOST || "http://localhost:9200";
-const ES_INDEX_NAME = process.env.ES_INDEX_NAME || "documents_chunks";
-const ES_API_KEY = process.env.ES_API_KEY || "secret_api_key";
+dotenv.config();
+
+const ES_HOST = process.env.ES_HOST;
+const ES_INDEX_NAME = process.env.ES_INDEX_NAME;
+const ES_API_KEY = process.env.ES_API_KEY;
 
 const esClient = axios.create({
   baseURL: ES_HOST,
@@ -369,7 +372,8 @@ export async function deleteDocumentChunks(documentId: number): Promise<any> {
  */
 export async function checkHealth(): Promise<any> {
   try {
-    const response = await esClient.get(`/_cluster/health`);
+    // Use root endpoint for health check as _cluster/health may not work with API keys
+    const response = await esClient.get(`/`);
     return response.data;
   } catch (error) {
     console.error("[Elasticsearch] Health check failed:", error);
