@@ -6,13 +6,13 @@ import axios, { AxiosError } from "axios";
 
 const ES_HOST = process.env.ES_HOST || "http://localhost:9200";
 const ES_INDEX_NAME = process.env.ES_INDEX_NAME || "documents_chunks";
-const ES_CLOUD_API_KEY = process.env.ES_CLOUD_API_KEY || "";
+const ES_API_KEY = process.env.ES_API_KEY || "secret_api_key";
 
 const esClient = axios.create({
   baseURL: ES_HOST,
-  headers: ES_CLOUD_API_KEY
+  headers: ES_API_KEY
     ? {
-        Authorization: `ApiKey ${ES_CLOUD_API_KEY}`,
+        Authorization: `ApiKey ${ES_API_KEY}`,
         "Content-Type": "application/json",
       }
     : {
