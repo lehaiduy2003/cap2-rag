@@ -52,7 +52,7 @@ export interface ESSearchResult {
 export async function createElasticsearchIndex(): Promise<boolean> {
   try {
     // Check if index already exists
-    const checkResponse = await esClient.head(`${ES_HOST}/${ES_INDEX_NAME}`, {
+    const checkResponse = await esClient.head(`/${ES_INDEX_NAME}`, {
       validateStatus: () => true,
     });
 
@@ -108,7 +108,7 @@ export async function createElasticsearchIndex(): Promise<boolean> {
       },
     };
 
-    await esClient.put(`${ES_HOST}/${ES_INDEX_NAME}`, mappings);
+    await esClient.put(`/${ES_INDEX_NAME}`, mappings);
     console.log(`[Elasticsearch] Successfully created index '${ES_INDEX_NAME}'`);
     return true;
   } catch (error) {
@@ -123,10 +123,7 @@ export async function createElasticsearchIndex(): Promise<boolean> {
  */
 export async function indexChunk(chunkData: ESChunk): Promise<any> {
   try {
-    const response = await esClient.post(
-      `${ES_HOST}/${ES_INDEX_NAME}/_doc/${chunkData.chunk_id}`,
-      chunkData
-    );
+    const response = await esClient.post(`/${ES_INDEX_NAME}/_doc/${chunkData.chunk_id}`, chunkData);
     return response.data;
   } catch (error) {
     const err = error as AxiosError;
@@ -148,7 +145,7 @@ export async function bulkIndexChunks(chunks: ESChunk[]): Promise<any> {
     }
 
     const response = await esClient.post(
-      `${ES_HOST}/_bulk`,
+      `/_bulk`,
       bulkBody.map((item) => JSON.stringify(item)).join("\n") + "\n",
       { headers: { "Content-Type": "application/x-ndjson" } }
     );
@@ -212,7 +209,7 @@ export async function textSearch(
       ],
     };
 
-    const response = await esClient.post(`${ES_HOST}/${ES_INDEX_NAME}/_search`, searchBody);
+    const response = await esClient.post(`/${ES_INDEX_NAME}/_search`, searchBody);
 
     return response.data.hits.hits.map((hit: any) => ({
       ...hit._source,
@@ -264,7 +261,7 @@ export async function vectorSearch(
       ],
     };
 
-    const response = await esClient.post(`${ES_HOST}/${ES_INDEX_NAME}/_search`, searchBody);
+    const response = await esClient.post(`/${ES_INDEX_NAME}/_search`, searchBody);
 
     return response.data.hits.hits.map((hit: any) => ({
       ...hit._source,
@@ -331,7 +328,7 @@ export async function hybridSearch(
       ],
     };
 
-    const response = await esClient.post(`${ES_HOST}/${ES_INDEX_NAME}/_search`, searchBody);
+    const response = await esClient.post(`/${ES_INDEX_NAME}/_search`, searchBody);
 
     return response.data.hits.hits.map((hit: any) => ({
       ...hit._source,
@@ -354,10 +351,7 @@ export async function deleteDocumentChunks(documentId: number): Promise<any> {
       query: { term: { document_id: documentId } },
     };
 
-    const response = await esClient.post(
-      `${ES_HOST}/${ES_INDEX_NAME}/_delete_by_query`,
-      deleteBody
-    );
+    const response = await esClient.post(`/${ES_INDEX_NAME}/_delete_by_query`, deleteBody);
 
     console.log(
       `[Elasticsearch] Deleted ${response.data.deleted} chunks for document ${documentId}`
@@ -375,7 +369,7 @@ export async function deleteDocumentChunks(documentId: number): Promise<any> {
  */
 export async function checkHealth(): Promise<any> {
   try {
-    const response = await esClient.get(`${ES_HOST}/_cluster/health`);
+    const response = await esClient.get(`/_cluster/health`);
     return response.data;
   } catch (error) {
     console.error("[Elasticsearch] Health check failed:", error);
