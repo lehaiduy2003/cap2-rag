@@ -7,9 +7,11 @@ import {
   extractTextFromFile,
   deleteDocument,
   getDocuments,
-} from "./documentService";
+  processDocumentFromUrl,
+} from "./service/documentService";
 import { bulkIndexChunks, deleteDocumentChunks } from "./elasticsearchClient";
 import { retrieveRelevantChunks, getDocumentContext, searchWithFilters } from "./ragRetrieval";
+import { runOrchestrator, getSessionHistory, clearSessionMemory } from "./orchestratorAgent";
 
 // Configure multer for file uploads
 const upload = multer({
@@ -40,6 +42,44 @@ export function createRAGRoutes(pool: Pool): Router {
   const router = Router();
 
   // ===== DOCUMENT MANAGEMENT ENDPOINTS =====
+
+  /**
+   * POST /api/documents/process-url
+   * Process a document from URL and update VAT service
+   */
+  router.post("/documents/process-url", async (req: Request, res: Response): Promise<any> => {
+    try {
+      const { document_id, upload_url, vat_service_url, vat_api_key, metadata } = req.body;
+
+      if (!document_id || !upload_url || !vat_service_url) {
+        return res.status(400).json({
+          error: "document_id, upload_url, and vat_service_url are required",
+        });
+      }
+
+      console.log(`[RAG API] Starting processing for document ${document_id} from ${upload_url}`);
+
+      // Return immediate response
+      res.json({
+        success: true,
+        message: "Document processing started",
+        document_id,
+      });
+
+      // Process document asynchronously (no database access needed)
+      processDocumentFromUrl(document_id, upload_url, vat_service_url, vat_api_key, metadata).catch(
+        (error: Error) => {
+          console.error(
+            `[RAG API] Background processing failed for document ${document_id}:`,
+            error.message
+          );
+        }
+      );
+    } catch (error) {
+      console.error("[RAG API] Error starting document processing:", (error as Error).message);
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
 
   /**
    * POST /api/rag/documents/process
@@ -98,13 +138,13 @@ export function createRAGRoutes(pool: Pool): Router {
         content_type: metadata.content_type,
       };
 
-      const { documentId, filePath } = await saveDocument(pool, fileData, docMetadata);
+      const { documentId, filePath } = await saveDocument(fileData, docMetadata);
 
       // Extract text from the saved file
       const fullText = await extractTextFromFile(filePath, metadata.content_type);
 
       // Process document (chunk and embed)
-      const chunkRecords = await processDocument(pool, documentId, fullText, docMetadata);
+      const chunkRecords = await processDocument(documentId, fullText, docMetadata);
 
       // Get document details for Elasticsearch
       const docResult = await pool.query(
@@ -127,12 +167,6 @@ export function createRAGRoutes(pool: Pool): Router {
       }));
 
       await bulkIndexChunks(esChunks);
-
-      // Mark chunks as indexed
-      const chunkIds = chunkRecords.map((c) => c.chunk_id);
-      await pool.query("UPDATE document_chunks SET es_indexed = TRUE WHERE id = ANY($1)", [
-        chunkIds,
-      ]);
 
       console.log(`[RAG API] Successfully processed document ${document_id}`);
 
@@ -178,13 +212,13 @@ export function createRAGRoutes(pool: Pool): Router {
         }
 
         // Save document
-        const { documentId, filePath } = await saveDocument(pool, req.file, metadata);
+        const { documentId, filePath } = await saveDocument(req.file, metadata);
 
         // Extract text from file
         const fullText = await extractTextFromFile(filePath, req.file.mimetype);
 
         // Process document (chunk and embed) in background
-        processDocument(pool, documentId, fullText, metadata)
+        processDocument(documentId, fullText, metadata)
           .then(async (chunkRecords) => {
             // Get document details for Elasticsearch
             const docResult = await pool.query(
@@ -207,12 +241,6 @@ export function createRAGRoutes(pool: Pool): Router {
             }));
 
             await bulkIndexChunks(esChunks);
-
-            // Mark chunks as indexed in PostgreSQL
-            const chunkIds = chunkRecords.map((c) => c.chunk_id);
-            await pool.query("UPDATE document_chunks SET es_indexed = TRUE WHERE id = ANY($1)", [
-              chunkIds,
-            ]);
 
             console.log(
               `[RAG API] Successfully indexed ${esChunks.length} chunks in Elasticsearch`
@@ -246,7 +274,7 @@ export function createRAGRoutes(pool: Pool): Router {
         limit: req.query.limit ? parseInt(req.query.limit as string) : 50,
       };
 
-      const documents = await getDocuments(pool, filters);
+      const documents = await getDocuments(filters);
       res.json({ documents });
     } catch (error) {
       console.error("[RAG API] Error getting documents:", (error as Error).message);
@@ -271,8 +299,8 @@ export function createRAGRoutes(pool: Pool): Router {
 
       const document = docResult.rows[0];
 
-      // Get chunks
-      const chunks = await getDocumentContext(pool, documentId, {
+      // Get chunks from Elasticsearch
+      const chunks = await getDocumentContext(documentId, {
         maxChunks: 100,
       });
 
@@ -295,11 +323,9 @@ export function createRAGRoutes(pool: Pool): Router {
     try {
       const documentId = parseInt(req.params.id);
 
-      // Delete from Elasticsearch
+      // Delete from Elasticsearch and filesystem
       await deleteDocumentChunks(documentId);
-
-      // Delete from database
-      await deleteDocument(pool, documentId);
+      await deleteDocument(documentId);
 
       res.json({
         success: true,
@@ -327,12 +353,12 @@ export function createRAGRoutes(pool: Pool): Router {
 
       let results;
       if (filters && Object.keys(filters).length > 0) {
-        results = await searchWithFilters(pool, query, {
+        results = await searchWithFilters(query, {
           ...filters,
           topK: top_k || 5,
         });
       } else {
-        results = await retrieveRelevantChunks(pool, query, {
+        results = await retrieveRelevantChunks(query, {
           topK: top_k || 5,
         });
       }
@@ -363,7 +389,7 @@ export function createRAGRoutes(pool: Pool): Router {
         return res.status(400).json({ error: "owner_id is required for property/owner KB scope" });
       }
 
-      const chunks = await retrieveRelevantChunks(pool, query, {
+      const chunks = await retrieveRelevantChunks(query, {
         topK: top_k || 5,
         searchType: search_type || "hybrid",
         minScore: min_score || 0.7,
@@ -380,6 +406,108 @@ export function createRAGRoutes(pool: Pool): Router {
       });
     } catch (error) {
       console.error("[RAG API] Error retrieving context:", (error as Error).message);
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  // ===== CHAT ENDPOINTS WITH RAG AND MEMORY =====
+
+  /**
+   * POST /api/rag/chat
+   * Chat with AI using RAG and conversation memory
+   * Memory keeps last 6 messages (3 exchanges) per session
+   */
+  router.post("/chat", async (req: Request, res: Response): Promise<any> => {
+    try {
+      const { message, session_id, property_id, owner_id, user_id } = req.body;
+
+      if (!message || !message.trim()) {
+        return res.status(400).json({ error: "Message is required" });
+      }
+
+      if (!property_id && !owner_id) {
+        return res.status(400).json({
+          error: "Either property_id or owner_id is required for context",
+        });
+      }
+
+      // Create session ID if not provided (userId-propertyId or userId-ownerId)
+      const sessionId =
+        session_id ||
+        `${user_id || "guest"}-${property_id ? `property-${property_id}` : `owner-${owner_id}`}`;
+
+      console.log(
+        `[RAG API] Chat request - Session: ${sessionId}, Property: ${property_id}, Owner: ${owner_id}`
+      );
+
+      // Use orchestrator agent for intelligent tool selection
+      const result = await runOrchestrator(
+        sessionId,
+        message,
+        property_id ? Number(property_id) : undefined,
+        owner_id?.toString()
+      );
+
+      res.json({
+        success: true,
+        session_id: sessionId,
+        response: result.response,
+        sources: result.sources || [],
+      });
+    } catch (error) {
+      console.error("[RAG API] Error in chat:", (error as Error).message);
+      res.status(500).json({
+        error: "Failed to process chat message",
+        details: (error as Error).message,
+      });
+    }
+  });
+
+  /**
+   * GET /api/rag/chat/history/:session_id
+   * Get chat history for a session
+   */
+  router.get("/chat/history/:session_id", async (req: Request, res: Response): Promise<any> => {
+    try {
+      const { session_id } = req.params;
+
+      if (!session_id) {
+        return res.status(400).json({ error: "Session ID is required" });
+      }
+
+      const history = await getSessionHistory(session_id);
+
+      res.json({
+        session_id,
+        history,
+        message_count: history.length,
+      });
+    } catch (error) {
+      console.error("[RAG API] Error getting chat history:", (error as Error).message);
+      res.status(500).json({ error: (error as Error).message });
+    }
+  });
+
+  /**
+   * DELETE /api/rag/chat/:session_id
+   * Clear chat history for a session
+   */
+  router.delete("/chat/:session_id", async (req: Request, res: Response): Promise<any> => {
+    try {
+      const { session_id } = req.params;
+
+      if (!session_id) {
+        return res.status(400).json({ error: "Session ID is required" });
+      }
+
+      clearSessionMemory(session_id);
+
+      res.json({
+        success: true,
+        message: `Chat history cleared for session: ${session_id}`,
+      });
+    } catch (error) {
+      console.error("[RAG API] Error clearing chat history:", (error as Error).message);
       res.status(500).json({ error: (error as Error).message });
     }
   });

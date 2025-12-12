@@ -33,6 +33,11 @@ interface ESChunk {
   owner_id?: string;
   property_id?: number;
   metadata?: Record<string, any>;
+  // Property metadata for enhanced search
+  description?: string;
+  price?: number;
+  room_size?: number;
+  address_details?: string;
   created_at: string;
 }
 
@@ -47,6 +52,11 @@ export interface ESSearchResult {
   score: number;
   similarity_score?: number;
   source: string;
+  // Property metadata in search results
+  description?: string;
+  price?: number;
+  room_size?: number;
+  address_details?: string;
 }
 
 /**
@@ -106,6 +116,22 @@ export async function createElasticsearchIndex(): Promise<boolean> {
             similarity: "cosine",
           },
           metadata: { type: "object", enabled: true },
+          // Property metadata fields for better search and filtering
+          description: {
+            type: "text",
+            analyzer: "custom_text_analyzer",
+          },
+          price: {
+            type: "float",
+          },
+          room_size: {
+            type: "integer",
+          },
+          address_details: {
+            type: "text",
+            analyzer: "custom_text_analyzer",
+            fields: { keyword: { type: "keyword" } },
+          },
           created_at: { type: "date" },
         },
       },
@@ -209,6 +235,10 @@ export async function textSearch(
         "chunk_index",
         "owner_id",
         "property_id",
+        "description",
+        "price",
+        "room_size",
+        "address_details",
       ],
     };
 
@@ -261,6 +291,10 @@ export async function vectorSearch(
         "chunk_index",
         "owner_id",
         "property_id",
+        "description",
+        "price",
+        "room_size",
+        "address_details",
       ],
     };
 
@@ -328,6 +362,10 @@ export async function hybridSearch(
         "chunk_index",
         "owner_id",
         "property_id",
+        "description",
+        "price",
+        "room_size",
+        "address_details",
       ],
     };
 

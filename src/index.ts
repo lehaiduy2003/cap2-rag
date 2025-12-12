@@ -9,7 +9,7 @@ import express, { Request, Response, NextFunction } from "express";
 import { Pool } from "pg";
 import cors from "cors";
 import { createElasticsearchIndex, checkHealth } from "./elasticsearchClient";
-import { initializeEmbeddingModel } from "./documentService";
+import { initializeEmbeddingModel } from "./service/documentService";
 import { createRAGRoutes } from "./routes";
 import { validateApiKey, requestLogger, extractKBContext } from "./middleware/auth";
 

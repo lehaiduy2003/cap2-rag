@@ -1,31 +1,11 @@
 /**
  * RAG Retrieval Service
- * Combines PostgreSQL vector search and Elasticsearch for optimal retrieval
+ * Uses Elasticsearch for vector search and document retrieval
  */
 
-import { Pool } from "pg";
-import { generateEmbedding } from "./documentService";
+import { generateEmbedding } from "./service/documentService";
 import { vectorSearch, hybridSearch, textSearch } from "./elasticsearchClient";
-import { DocumentChunk, RetrievalOptions, SearchResult } from "./types";
-
-/**
- * Get chunk details from PostgreSQL by IDs
- * Used to enrich Elasticsearch results with full metadata
- */
-export async function getChunksByIds(pool: Pool, chunkIds: number[]): Promise<DocumentChunk[]> {
-  if (!chunkIds || chunkIds.length === 0) {
-    return [];
-  }
-
-  try {
-    const result = await pool.query("SELECT * FROM get_chunks_by_ids($1::INTEGER[])", [chunkIds]);
-
-    return result.rows as DocumentChunk[];
-  } catch (error) {
-    console.error("[RAG Retrieval] Error getting chunks by IDs:", (error as Error).message);
-    throw error;
-  }
-}
+import { RetrievalOptions, SearchResult } from "./types";
 
 /**
  * Retrieve relevant chunks from Elasticsearch with property/owner filtering
@@ -78,10 +58,8 @@ async function retrieveFromElasticsearch(
 
 /**
  * Retrieve relevant chunks using Elasticsearch only
- * PostgreSQL is used only to fetch complete metadata
  */
 export async function retrieveRelevantChunks(
-  pool: Pool,
   query: string,
   options: RetrievalOptions = {}
 ): Promise<SearchResult[]> {
@@ -98,6 +76,8 @@ export async function retrieveRelevantChunks(
       topK: Math.ceil(topK * 1.5),
       minScore,
       searchType,
+      ownerId: options.ownerId,
+      propertyId: options.propertyId,
     });
 
     if (esResults.length === 0) {
@@ -105,19 +85,8 @@ export async function retrieveRelevantChunks(
       return [];
     }
 
-    // Enrich with PostgreSQL metadata if needed
-    const chunkIds = esResults.map((r) => r.chunk_id);
-    const pgChunks = await getChunksByIds(pool, chunkIds);
-
-    // Merge ES results with PG metadata
-    const enrichedChunks = esResults.map((esChunk) => {
-      const pgChunk = pgChunks.find((pg) => pg.chunk_id === esChunk.chunk_id);
-      return {
-        ...esChunk,
-        ...(pgChunk || {}),
-        source: "elasticsearch" as const,
-      };
-    });
+    // Elasticsearch has all the data we need, no need to enrich from PostgreSQL
+    const enrichedChunks = esResults;
 
     // Rerank if requested
     let finalChunks: SearchResult[] = enrichedChunks;
@@ -215,28 +184,12 @@ export function formatContextForLLM(chunks: SearchResult[]): string {
  * Get document context for a specific document
  */
 export async function getDocumentContext(
-  pool: Pool,
-  documentId: number,
-  options: { maxChunks?: number } = {}
-): Promise<DocumentChunk[]> {
-  const { maxChunks = 10 } = options;
-
+  _documentId: number,
+  _options: { maxChunks?: number } = {}
+): Promise<SearchResult[]> {
   try {
-    const result = await pool.query(
-      `SELECT 
-        dc.id as chunk_id,
-        dc.chunk_text,
-        dc.chunk_index,
-        d.title as document_title
-       FROM document_chunks dc
-       JOIN documents d ON dc.document_id = d.id
-       WHERE dc.document_id = $1
-       ORDER BY dc.chunk_index
-       LIMIT $2`,
-      [documentId, maxChunks]
-    );
-
-    return result.rows as DocumentChunk[];
+    // Not implemented - using Elasticsearch directly
+    return [];
   } catch (error) {
     console.error("[RAG Retrieval] Error getting document context:", (error as Error).message);
     throw error;
@@ -247,7 +200,6 @@ export async function getDocumentContext(
  * Search with filters using Elasticsearch
  */
 export async function searchWithFilters(
-  _pool: Pool,
   query: string,
   filters: {
     documentIds?: number[];
