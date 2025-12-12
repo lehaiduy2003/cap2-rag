@@ -4,7 +4,8 @@
   "description": "RAG Service for Document Chunking, Embedding and Retrieval",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run copy-assets",
+    "copy-assets": "mkdir -p dist/prompts && cp -r src/prompts/*.md dist/prompts/",
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "watch": "tsc --watch",
