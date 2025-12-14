@@ -99,7 +99,7 @@ async function createOrchestratorAgent(sessionId: string) {
     ["placeholder", "{agent_scratchpad}"],
   ]);
 
-  // Create the agent
+  // Create the agent with explicit instructions for parallel tool calls
   const agent = createToolCallingAgent({
     llm: model,
     tools: agentTools as any, // Avoid deep type instantiation
@@ -111,7 +111,7 @@ async function createOrchestratorAgent(sessionId: string) {
     agent,
     tools: agentTools as any, // Avoid deep type instantiation
     memory,
-    verbose: true, // Set to false in production
+    verbose: false, // Set to false in production
     maxIterations: 5,
     returnIntermediateSteps: false,
     // Handle parsing errors from Gemini's function calling format
@@ -134,10 +134,6 @@ export async function runOrchestrator(
   sources?: any[];
 }> {
   try {
-    console.log(`[Orchestrator] Processing message for session: ${sessionId}`);
-    console.log(`[Orchestrator] Property ID: ${propertyId}, Owner ID: ${ownerId}`);
-    console.log(`[Orchestrator] User message: "${userMessage.substring(0, 100)}..."`);
-
     // Create agent for this session
     const executor = await createOrchestratorAgent(sessionId);
 
@@ -148,10 +144,6 @@ export async function runOrchestrator(
       owner_id: ownerId || "Not specified",
       session_id: sessionId,
     });
-
-    console.log(`[Orchestrator] Agent response generated`);
-    console.log(`[Orchestrator] Output type:`, typeof result.output);
-    console.log(`[Orchestrator] Output value:`, JSON.stringify(result.output));
 
     // Handle different types of output
     let responseText: string;

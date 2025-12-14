@@ -4,6 +4,7 @@
 
 import axios, { AxiosError } from "axios";
 import dotenv from "dotenv";
+import { ESChunk, ESSearchResult } from "./types";
 
 dotenv.config();
 
@@ -22,42 +23,6 @@ const esClient = axios.create({
         "Content-Type": "application/json",
       },
 });
-
-interface ESChunk {
-  chunk_id: number;
-  document_id: number;
-  document_title?: string;
-  chunk_text: string;
-  chunk_index: number;
-  embedding: number[];
-  owner_id?: string;
-  property_id?: number;
-  metadata?: Record<string, any>;
-  // Property metadata for enhanced search
-  description?: string;
-  price?: number;
-  room_size?: number;
-  address_details?: string;
-  created_at: string;
-}
-
-export interface ESSearchResult {
-  chunk_id: number;
-  document_id: number;
-  document_title: string;
-  chunk_text: string;
-  chunk_index: number;
-  owner_id?: string;
-  property_id?: number;
-  score: number;
-  similarity_score?: number;
-  source: string;
-  // Property metadata in search results
-  description?: string;
-  price?: number;
-  room_size?: number;
-  address_details?: string;
-}
 
 /**
  * Create Elasticsearch index with proper mappings for document chunks
@@ -93,14 +58,15 @@ export async function createElasticsearchIndex(): Promise<boolean> {
         properties: {
           document_id: { type: "integer" },
           chunk_id: { type: "integer" },
-          document_title: {
+          title: {
             type: "text",
             analyzer: "custom_text_analyzer",
-            fields: { keyword: { type: "keyword" } },
+            fields: { keyword: { type: "keyword", ignore_above: 256 } },
           },
           chunk_text: {
             type: "text",
             analyzer: "custom_text_analyzer",
+            // No keyword subfield to avoid ignore_above issues with long chunks
           },
           chunk_index: { type: "integer" },
           owner_id: {
@@ -114,23 +80,6 @@ export async function createElasticsearchIndex(): Promise<boolean> {
             dims: 384,
             index: true,
             similarity: "cosine",
-          },
-          metadata: { type: "object", enabled: true },
-          // Property metadata fields for better search and filtering
-          description: {
-            type: "text",
-            analyzer: "custom_text_analyzer",
-          },
-          price: {
-            type: "float",
-          },
-          room_size: {
-            type: "integer",
-          },
-          address_details: {
-            type: "text",
-            analyzer: "custom_text_analyzer",
-            fields: { keyword: { type: "keyword" } },
           },
           created_at: { type: "date" },
         },
@@ -204,7 +153,7 @@ export async function textSearch(
       {
         multi_match: {
           query: query,
-          fields: ["chunk_text^2", "document_title"],
+          fields: ["chunk_text^2", "title"],
           type: "best_fields",
           fuzziness: "AUTO",
         },
@@ -230,15 +179,11 @@ export async function textSearch(
       _source: [
         "document_id",
         "chunk_id",
-        "document_title",
+        "title",
         "chunk_text",
         "chunk_index",
         "owner_id",
         "property_id",
-        "description",
-        "price",
-        "room_size",
-        "address_details",
       ],
     };
 
@@ -286,15 +231,11 @@ export async function vectorSearch(
       _source: [
         "document_id",
         "chunk_id",
-        "document_title",
+        "title",
         "chunk_text",
         "chunk_index",
         "owner_id",
         "property_id",
-        "description",
-        "price",
-        "room_size",
-        "address_details",
       ],
     };
 
@@ -337,7 +278,7 @@ export async function hybridSearch(
             {
               multi_match: {
                 query: query,
-                fields: ["chunk_text^2", "document_title"],
+                fields: ["chunk_text^2", "title"],
                 type: "best_fields",
                 fuzziness: "AUTO",
               },
@@ -357,15 +298,11 @@ export async function hybridSearch(
       _source: [
         "document_id",
         "chunk_id",
-        "document_title",
+        "title",
         "chunk_text",
         "chunk_index",
         "owner_id",
         "property_id",
-        "description",
-        "price",
-        "room_size",
-        "address_details",
       ],
     };
 
@@ -385,22 +322,51 @@ export async function hybridSearch(
 
 /**
  * Delete document chunks from Elasticsearch
+ * Removes all chunks associated with a document_id using delete_by_query
+ * Works with semantic chunking - deletes ALL chunks regardless of count
  */
 export async function deleteDocumentChunks(documentId: number): Promise<any> {
   try {
+    console.log(`[Elasticsearch] Deleting all chunks for document ${documentId}...`);
+
     const deleteBody = {
-      query: { term: { document_id: documentId } },
+      query: {
+        term: { document_id: documentId },
+      },
     };
 
-    const response = await esClient.post(`/${ES_INDEX_NAME}/_delete_by_query`, deleteBody);
-
-    console.log(
-      `[Elasticsearch] Deleted ${response.data.deleted} chunks for document ${documentId}`
+    // Use refresh=true to make deletions immediately visible
+    const response = await esClient.post(
+      `/${ES_INDEX_NAME}/_delete_by_query?refresh=true&conflicts=proceed`,
+      deleteBody
     );
-    return response.data;
+
+    const deletedCount = response.data.deleted || 0;
+    const failures = response.data.failures || [];
+
+    if (failures.length > 0) {
+      console.warn(
+        `[Elasticsearch] Deleted ${deletedCount} chunks for document ${documentId}, but encountered ${failures.length} failures:`,
+        failures
+      );
+    } else {
+      console.log(
+        `[Elasticsearch] Successfully deleted ${deletedCount} chunk(s) for document ${documentId}`
+      );
+    }
+
+    return {
+      deleted: deletedCount,
+      failures: failures,
+      took: response.data.took,
+      timed_out: response.data.timed_out,
+    };
   } catch (error) {
     const err = error as AxiosError;
-    console.error("[Elasticsearch] Error deleting chunks:", err.response?.data || err.message);
+    console.error(
+      `[Elasticsearch] Error deleting chunks for document ${documentId}:`,
+      err.response?.data || err.message
+    );
     throw error;
   }
 }

@@ -8,6 +8,7 @@ dotenv.config();
 /**
  * Tool: Calculate Distance Between Properties or Addresses
  * Calculates the distance between two locations (properties or addresses)
+ * Uses Google Maps Distance Matrix API for accurate driving/walking distances
  */
 export const calculateDistanceTool = tool(
   async ({
@@ -15,24 +16,32 @@ export const calculateDistanceTool = tool(
     to_property_id,
     from_address,
     to_address,
+    mode,
   }: {
     from_property_id?: number;
     to_property_id?: number;
     from_address?: string;
     to_address?: string;
+    mode?: string;
   }): Promise<string> => {
     try {
+
+      const propertyResponse = from_property_id ? await axios.get(
+        `${process.env.BE_API_URL}/api/mcp/tools/property/${from_property_id}`,
+        {
+          headers: process.env.BE_API_KEY ? { "x-api-key": process.env.BE_API_KEY } : {},
+          timeout: 10000,
+        }
+      ) : null;
+
+      const propertyData = propertyResponse ? propertyResponse.data : null;
       console.log(
         `[Tool: Distance] Calculating distance from ${from_property_id || from_address} to ${
           to_property_id || to_address
-        }`
+        } (mode: ${mode || "driving"})`
       );
 
       // Validate inputs
-      if (!from_property_id && !from_address && !to_property_id && !to_address) {
-        return "Error: Must provide at least source and destination (either property IDs or addresses)";
-      }
-
       if (!from_property_id && !from_address) {
         return "Error: Must provide source location (from_property_id or from_address)";
       }
@@ -46,12 +55,14 @@ export const calculateDistanceTool = tool(
       if (from_property_id) params.fromPropertyId = from_property_id;
       if (to_property_id) params.toPropertyId = to_property_id;
       if (from_address) params.fromAddress = from_address;
+      else if (propertyData) params.fromAddress = `${propertyData.addressDetails}`;
       if (to_address) params.toAddress = to_address;
+      if (mode) params.mode = mode;
 
       const response = await axios.get(`${process.env.BE_API_URL}/api/mcp/tools/distance`, {
         headers: process.env.BE_API_KEY ? { "x-api-key": process.env.BE_API_KEY } : {},
         params,
-        timeout: 10000,
+        timeout: 15000, // Increased timeout for Distance Matrix API
       });
 
       const result = response.data;
@@ -69,8 +80,16 @@ export const calculateDistanceTool = tool(
           distance: {
             kilometers: result.distanceKm,
             meters: result.distanceMeters,
-            formatted: `${result.distanceKm} km (${result.distanceMeters} meters)`,
+            text: result.distanceText,
+            formatted: `${result.distanceKm} km (${result.distanceText})`,
           },
+          duration: {
+            minutes: result.durationMinutes,
+            seconds: result.durationSeconds,
+            text: result.durationText,
+            formatted: `${result.durationMinutes} minutes (${result.durationText})`,
+          },
+          travelMode: result.travelMode,
           coordinates: {
             from: {
               latitude: result.fromCoordinates[0],
@@ -116,6 +135,10 @@ export const calculateDistanceTool = tool(
         .string()
         .optional()
         .describe("Destination address (optional if to_property_id provided)"),
+      mode: z
+        .string()
+        .optional()
+        .describe("Travel mode: 'driving' (default), 'walking', 'bicycling', or 'transit'"),
     }) as any,
   }
 );

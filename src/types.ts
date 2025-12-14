@@ -52,6 +52,18 @@ export interface ChunkRecord {
   embedding: number[];
 }
 
+export interface ESChunk {
+  chunk_id: number;
+  document_id: number;
+  title?: string;
+  chunk_text: string;
+  chunk_index: number;
+  embedding: number[];
+  owner_id?: string;
+  property_id?: number;
+  created_at: string;
+}
+
 export interface RetrievalOptions {
   topK?: number;
   minScore?: number;
@@ -62,16 +74,19 @@ export interface RetrievalOptions {
   kbScope?: "property" | "owner" | "global";
 }
 
-export interface SearchResult {
+export interface ESSearchResult {
   chunk_id: number;
   document_id: number;
-  document_title: string;
+  title?: string;
   chunk_text: string;
-  chunk_index?: number;
+  chunk_index: number;
   owner_id?: string;
   property_id?: number;
-  score?: number;
+  score: number;
   similarity_score?: number;
-  rerank_score?: number;
   source: string;
+}
+
+export interface SearchResult extends ESSearchResult {
+  rerank_score?: number;
 }

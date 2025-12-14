@@ -59,31 +59,372 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 }
 
 /**
- * Chunk text into smaller pieces with overlap
+ * Estimate token count (approximate: 1 token ≈ 4 characters for Vietnamese/English mix)
  */
-export function chunkText(text: string, chunkSize: number = 500, overlap: number = 50): string[] {
-  const chunks: string[] = [];
-  const words = text.split(/\s+/);
+function estimateTokenCount(text: string): number {
+  return Math.ceil(text.length / 4);
+}
 
-  let currentChunk: string[] = [];
-  let currentSize = 0;
+/**
+ * Semantic section patterns for Vietnamese property documents
+ */
+interface SemanticSection {
+  title: string;
+  content: string;
+  priority: number; // Higher priority = more important
+}
 
-  for (let i = 0; i < words.length; i++) {
-    currentChunk.push(words[i]);
-    currentSize++;
+/**
+ * Detect semantic sections in document based on headers and structure
+ */
+function detectSemanticSections(text: string): SemanticSection[] {
+  const sections: SemanticSection[] = [];
 
-    if (currentSize >= chunkSize || i === words.length - 1) {
-      chunks.push(currentChunk.join(" "));
+  // Common Vietnamese document section patterns
+  const sectionPatterns = [
+    // Basic information sections
+    {
+      regex:
+        /(?:^|\n)(?:I\.|1\.|###?)\s*(Thông tin cơ bản|Thông tin chung|Giới thiệu)[\s\S]*?(?=(?:\n(?:II\.|2\.|###?)|\n#{1,3}\s|$))/gi,
+      title: "Thông tin cơ bản",
+      priority: 10,
+    },
+    {
+      regex:
+        /(?:^|\n)(?:Thông tin phòng trọ|Mô tả phòng)[:\s]*([^\n]+(?:\n(?!(?:II\.|2\.|###?|Giá|Địa chỉ|Hợp đồng|Quy định))[^\n]+)*)/gi,
+      title: "Thông tin phòng trọ",
+      priority: 10,
+    },
 
-      // Create overlap for next chunk
-      if (i < words.length - 1) {
-        currentChunk = currentChunk.slice(-overlap);
-        currentSize = currentChunk.length;
+    // Pricing sections
+    {
+      regex:
+        /(?:^|\n)(?:II\.|2\.|###?)\s*(Giá thuê|Giá cả|Chi phí)[\s\S]*?(?=(?:\n(?:III\.|3\.|###?)|\n#{1,3}\s|$))/gi,
+      title: "Thông tin giá thuê",
+      priority: 9,
+    },
+    {
+      regex:
+        /(?:^|\n)(?:Giá thuê|Giá)[:\s]*([^\n]+(?:\n(?!(?:III\.|3\.|###?|Địa chỉ|Hợp đồng|Quy định))[^\n]+)*)/gi,
+      title: "Thông tin giá thuê",
+      priority: 9,
+    },
+
+    // Location/Address sections
+    {
+      regex:
+        /(?:^|\n)(?:III\.|3\.|###?)\s*(Địa chỉ|Vị trí|Khu vực)[\s\S]*?(?=(?:\n(?:IV\.|4\.|###?)|\n#{1,3}\s|$))/gi,
+      title: "Thông tin địa chỉ",
+      priority: 9,
+    },
+    {
+      regex:
+        /(?:^|\n)(?:Địa chỉ)[:\s]*([^\n]+(?:\n(?!(?:IV\.|4\.|###?|Hợp đồng|Quy định))[^\n]+)*)/gi,
+      title: "Thông tin địa chỉ",
+      priority: 9,
+    },
+
+    // Contract sections
+    {
+      regex:
+        /(?:^|\n)(?:IV\.|4\.|###?)\s*(Hợp đồng|Điều khoản hợp đồng|Thỏa thuận)[\s\S]*?(?=(?:\n(?:V\.|5\.|###?)|\n#{1,3}\s|$))/gi,
+      title: "Thông tin hợp đồng",
+      priority: 8,
+    },
+    {
+      regex:
+        /(?:^|\n)(?:Hợp đồng|Điều khoản)[:\s]*([^\n]+(?:\n(?!(?:V\.|5\.|###?|Quy định|Tiện ích))[^\n]+)*)/gi,
+      title: "Thông tin hợp đồng",
+      priority: 8,
+    },
+
+    // Rules and regulations
+    {
+      regex:
+        /(?:^|\n)(?:V\.|5\.|###?)\s*(Quy định|Nội quy|Quy tắc|Lưu ý)[\s\S]*?(?=(?:\n(?:VI\.|6\.|###?)|\n#{1,3}\s|$))/gi,
+      title: "Quy định và nội quy",
+      priority: 7,
+    },
+    {
+      regex:
+        /(?:^|\n)(?:Quy định|Nội quy)[:\s]*([^\n]+(?:\n(?!(?:VI\.|6\.|###?|Tiện ích|Liên hệ))[^\n]+)*)/gi,
+      title: "Quy định và nội quy",
+      priority: 7,
+    },
+
+    // Amenities/Utilities
+    {
+      regex:
+        /(?:^|\n)(?:VI\.|6\.|###?)\s*(Tiện ích|Tiện nghi|Cơ sở vật chất)[\s\S]*?(?=(?:\n(?:VII\.|7\.|###?)|\n#{1,3}\s|$))/gi,
+      title: "Tiện ích và tiện nghi",
+      priority: 6,
+    },
+    {
+      regex:
+        /(?:^|\n)(?:Tiện ích|Tiện nghi)[:\s]*([^\n]+(?:\n(?!(?:VII\.|7\.|###?|Liên hệ))[^\n]+)*)/gi,
+      title: "Tiện ích và tiện nghi",
+      priority: 6,
+    },
+
+    // Contact/Summary sections
+    {
+      regex:
+        /(?:^|\n)(?:VII\.|7\.|###?)\s*(Liên hệ|Thông tin liên hệ|Tổng kết)[\s\S]*?(?=(?:\n(?:VIII\.|8\.|###?)|\n#{1,3}\s|$))/gi,
+      title: "Thông tin liên hệ",
+      priority: 5,
+    },
+    {
+      regex:
+        /(?:^|\n)(?:Tóm tắt|Kết luận|Tổng kết)[:\s]*([^\n]+(?:\n(?!(?:VIII\.|8\.|###?))[^\n]+)*)/gi,
+      title: "Tóm tắt",
+      priority: 5,
+    },
+  ];
+
+  // Track matched positions to find unmatched content
+  interface MatchedRange {
+    start: number;
+    end: number;
+    content: string;
+  }
+  const matchedRanges: MatchedRange[] = [];
+
+  for (const pattern of sectionPatterns) {
+    const matches = text.matchAll(pattern.regex);
+    for (const match of matches) {
+      const content = match[0].trim();
+      const startPos = text.indexOf(content);
+
+      if (startPos === -1) continue;
+
+      // Check for overlaps with existing ranges
+      const isOverlapping = matchedRanges.some(
+        (range) =>
+          (startPos >= range.start && startPos < range.end) ||
+          (startPos + content.length > range.start && startPos + content.length <= range.end) ||
+          (startPos <= range.start && startPos + content.length >= range.end)
+      );
+
+      // Only add if content is substantial and not overlapping
+      if (content.length > 50 && !isOverlapping) {
+        matchedRanges.push({
+          start: startPos,
+          end: startPos + content.length,
+          content: content,
+        });
+        sections.push({
+          title: pattern.title,
+          content: content,
+          priority: pattern.priority,
+        });
       }
     }
   }
 
-  return chunks.filter((chunk) => chunk.trim().length > 0);
+  // Sort matched ranges by position to find gaps
+  matchedRanges.sort((a, b) => a.start - b.start);
+
+  // Find unmatched content (gaps between matched sections)
+  const unmatchedSections: string[] = [];
+  let lastEnd = 0;
+
+  for (const range of matchedRanges) {
+    if (range.start > lastEnd) {
+      const unmatchedContent = text.substring(lastEnd, range.start).trim();
+      if (unmatchedContent.length > 50) {
+        unmatchedSections.push(unmatchedContent);
+      }
+    }
+    lastEnd = Math.max(lastEnd, range.end);
+  }
+
+  // Check for content after the last matched section
+  if (lastEnd < text.length) {
+    const remainingContent = text.substring(lastEnd).trim();
+    if (remainingContent.length > 50) {
+      unmatchedSections.push(remainingContent);
+    }
+  }
+
+  // Add unmatched sections as "Other/Description" sections with lower priority
+  for (let i = 0; i < unmatchedSections.length; i++) {
+    sections.push({
+      title: unmatchedSections.length === 1 ? "Mô tả khác" : `Mô tả khác - Phần ${i + 1}`,
+      content: unmatchedSections[i],
+      priority: 3, // Lower priority than specific sections
+    });
+  }
+
+  // Sort by priority (descending) and then by position in text
+  sections.sort((a, b) => {
+    if (a.priority !== b.priority) {
+      return b.priority - a.priority;
+    }
+    return text.indexOf(a.content) - text.indexOf(b.content);
+  });
+
+  console.log(
+    `[Chunking] Detected ${sections.length} sections (${
+      sections.filter((s) => s.priority === 3).length
+    } unmatched)`
+  );
+
+  return sections;
+}
+
+/**
+ * Chunk text by semantic sections with proper titles
+ */
+function chunkBySemantic(text: string, maxTokens: number = 400): string[] {
+  const chunks: string[] = [];
+  const sections = detectSemanticSections(text);
+
+  if (sections.length === 0) {
+    // If no sections detected at all, treat entire text as "Other description"
+    console.log(`[Chunking] No semantic sections detected, chunking entire text as description`);
+    const textTokens = estimateTokenCount(text);
+
+    if (textTokens <= maxTokens) {
+      chunks.push(`[Mô tả khác]\n${text}`);
+    } else {
+      const subsections = splitLongSection(text, "Mô tả khác", maxTokens);
+      chunks.push(...subsections);
+    }
+    return chunks;
+  }
+
+  console.log(`[Chunking] Found ${sections.length} semantic sections`);
+
+  for (const section of sections) {
+    const sectionTokens = estimateTokenCount(section.content);
+
+    // If section is small enough, create one chunk with title
+    if (sectionTokens <= maxTokens) {
+      const chunkWithTitle = `[${section.title}]\n${section.content}`;
+      chunks.push(chunkWithTitle);
+    } else {
+      // Split large section into smaller chunks but keep the title
+      const subsections = splitLongSection(section.content, section.title, maxTokens);
+      chunks.push(...subsections);
+    }
+  }
+
+  return chunks;
+}
+
+/**
+ * Split a long section into smaller chunks while preserving context
+ */
+function splitLongSection(content: string, sectionTitle: string, maxTokens: number): string[] {
+  const chunks: string[] = [];
+  const paragraphs = content.split(/\n\n+/);
+
+  let currentChunk = `[${sectionTitle}]\n`;
+  let currentTokens = estimateTokenCount(currentChunk);
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const paragraph = paragraphs[i].trim();
+    if (!paragraph) continue;
+
+    const paragraphTokens = estimateTokenCount(paragraph);
+
+    // If single paragraph exceeds max, split it further
+    if (paragraphTokens > maxTokens) {
+      // Save current chunk if it has content
+      if (currentTokens > estimateTokenCount(`[${sectionTitle}]\n`)) {
+        chunks.push(currentChunk.trim());
+      }
+
+      // Split long paragraph by sentences
+      const sentences = paragraph.split(/[.!?。]+/).filter((s) => s.trim());
+      let sentenceChunk = `[${sectionTitle} - Phần ${chunks.length + 1}]\n`;
+      let sentenceTokens = estimateTokenCount(sentenceChunk);
+
+      for (const sentence of sentences) {
+        const sentenceWithPunct = sentence.trim() + ".";
+        const tokens = estimateTokenCount(sentenceWithPunct);
+
+        if (sentenceTokens + tokens > maxTokens && sentenceTokens > 0) {
+          chunks.push(sentenceChunk.trim());
+          sentenceChunk = `[${sectionTitle} - Phần ${chunks.length + 1}]\n${sentenceWithPunct}\n`;
+          sentenceTokens = estimateTokenCount(sentenceChunk);
+        } else {
+          sentenceChunk += sentenceWithPunct + " ";
+          sentenceTokens += tokens;
+        }
+      }
+
+      if (sentenceTokens > 0) {
+        chunks.push(sentenceChunk.trim());
+      }
+
+      // Reset for next paragraph
+      currentChunk = `[${sectionTitle}]\n`;
+      currentTokens = estimateTokenCount(currentChunk);
+      continue;
+    }
+
+    // Check if adding this paragraph would exceed the limit
+    if (
+      currentTokens + paragraphTokens > maxTokens &&
+      currentTokens > estimateTokenCount(`[${sectionTitle}]\n`)
+    ) {
+      chunks.push(currentChunk.trim());
+      currentChunk = `[${sectionTitle} - Tiếp theo]\n${paragraph}\n\n`;
+      currentTokens = estimateTokenCount(currentChunk);
+    } else {
+      currentChunk += paragraph + "\n\n";
+      currentTokens += paragraphTokens;
+    }
+  }
+
+  // Add remaining content
+  if (currentTokens > estimateTokenCount(`[${sectionTitle}]\n`)) {
+    chunks.push(currentChunk.trim());
+  }
+
+  return chunks;
+}
+
+/**
+ * Smart chunking: Try semantic first, fallback to length-based
+ */
+export function chunkText(text: string, chunkSize: number = 400): string[] {
+  console.log(
+    `[Chunking] Processing text of ${text.length} characters (≈${estimateTokenCount(text)} tokens)`
+  );
+
+  if (!text || text.trim().length === 0) {
+    console.log(`[Chunking] Empty text provided, returning empty array`);
+    return [];
+  }
+
+  // Try semantic chunking first (will always return chunks now, never empty)
+  const semanticChunks = chunkBySemantic(text, chunkSize);
+
+  console.log(`[Chunking] Created ${semanticChunks.length} semantic chunks`);
+
+  // Verify we captured all content by comparing total length
+  const totalChunkLength = semanticChunks.reduce((sum, chunk) => {
+    // Remove section headers like "[Mô tả khác]\n" to get actual content length
+    const contentWithoutHeader = chunk.replace(/^\[.*?\]\n/, "");
+    return sum + contentWithoutHeader.length;
+  }, 0);
+
+  const originalLength = text.length;
+  const captureRate = (totalChunkLength / originalLength) * 100;
+
+  console.log(
+    `[Chunking] Content capture rate: ${captureRate.toFixed(
+      1
+    )}% (${totalChunkLength}/${originalLength} chars)`
+  );
+
+  if (captureRate < 90) {
+    console.warn(`[Chunking] Low capture rate detected! Some content may be missing.`);
+  }
+
+  return semanticChunks;
 }
 
 /**
@@ -100,8 +441,7 @@ export async function processDocument(
 
     // Chunk the text
     const chunkSize = metadata.chunk_size || 500;
-    const overlap = metadata.overlap || 50;
-    const chunks = chunkText(fullText, chunkSize, overlap);
+    const chunks = chunkText(fullText, chunkSize);
 
     console.log(`[DocumentService] Created ${chunks.length} chunks for document ${documentId}`);
 
@@ -236,38 +576,6 @@ export async function saveDocument(
   }
 }
 
-/**
- * Delete a document and all its chunks from Elasticsearch
- */
-export async function deleteDocument(documentId: number): Promise<boolean> {
-  const { deleteDocumentChunks } = require("../elasticsearchClient");
-
-  try {
-    // Delete from Elasticsearch
-    await deleteDocumentChunks(documentId);
-
-    // Delete files from filesystem (search for files with this document ID)
-    const uploadsDir = path.join(__dirname, "../uploads/documents");
-    const files = await fs.readdir(uploadsDir);
-
-    for (const file of files) {
-      if (file.includes(`${documentId}_`)) {
-        const filePath = path.join(uploadsDir, file);
-        if (await fs.pathExists(filePath)) {
-          await fs.remove(filePath);
-          console.log(`[DocumentService] Deleted file: ${file}`);
-        }
-      }
-    }
-
-    console.log(`[DocumentService] Deleted document ${documentId}`);
-    return true;
-  } catch (error) {
-    console.error("[DocumentService] Error deleting document:", (error as Error).message);
-    throw error;
-  }
-}
-
 interface DocumentFilters {
   status?: string;
   uploaded_by?: string;
@@ -384,7 +692,8 @@ export async function processDocumentFromUrl(
     const chunkRecords = await processDocument(documentId, enrichedFullText, docMetadata);
     console.log(`[DocumentService] Created ${chunkRecords.length} chunks`);
 
-    // Index in Elasticsearch with property metadata (no DB query needed - use passed metadata)
+    // Index in Elasticsearch - only chunk-specific and document-specific data
+    // Property metadata (description, price, etc.) should be fetched from VAT service when needed
     const esChunks = chunkRecords.map((chunk) => ({
       chunk_id: chunk.chunk_id,
       document_id: chunk.document_id,
@@ -394,11 +703,6 @@ export async function processDocumentFromUrl(
       owner_id: owner_id,
       property_id: property_id,
       embedding: chunk.embedding,
-      // Include property metadata for enhanced search
-      description: description,
-      price: price,
-      room_size: room_size,
-      address_details: address_details,
       created_at: new Date().toISOString(),
     }));
 

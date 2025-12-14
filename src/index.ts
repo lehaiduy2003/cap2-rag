@@ -166,9 +166,6 @@ async function startServer(): Promise<void> {
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`[RAG Service] Server running on port ${PORT}`);
       console.log(`[RAG Service] Database: ${dbConfig.database} on ${dbConfig.host}`);
-      console.log(
-        `[RAG Service] API Key Auth: ${process.env.API_KEY ? "Enabled" : "Disabled (dev mode)"}`
-      );
       console.log(`[RAG Service] Ready to accept requests`);
     });
   } catch (error) {

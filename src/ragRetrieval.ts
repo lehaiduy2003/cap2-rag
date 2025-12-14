@@ -47,7 +47,7 @@ async function retrieveFromElasticsearch(
 
     return results.map((result) => ({
       ...result,
-      document_title: result.document_title || "Untitled",
+      title: result.title || "Untitled",
       source: "elasticsearch" as const,
     }));
   } catch (error) {
@@ -173,7 +173,7 @@ export function formatContextForLLM(chunks: SearchResult[]): string {
   let context = "Relevant information from the knowledge base:\n\n";
 
   chunks.forEach((chunk, index) => {
-    context += `[${index + 1}] From "${chunk.document_title}":\n`;
+    context += `[${index + 1}] From "${chunk.title}":\n`;
     context += `${chunk.chunk_text}\n\n`;
   });
 
