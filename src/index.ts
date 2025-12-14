@@ -163,7 +163,7 @@ async function startServer(): Promise<void> {
     await initializeRAGSystem();
 
     // Start listening
-    app.listen(PORT, "0.0.0.0", () => {
+    app.listen(PORT, () => {
       console.log(`[RAG Service] Server running on port ${PORT}`);
       console.log(`[RAG Service] Database: ${dbConfig.database} on ${dbConfig.host}`);
       console.log(`[RAG Service] Ready to accept requests`);
