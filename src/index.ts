@@ -73,7 +73,29 @@ async function initializeRAGSystem(): Promise<boolean> {
 }
 
 // Middleware
-app.use(cors());
+const allowed = ["http://localhost:3000", "https://cap2-fe.vercel.app"];
+
+app.use(
+  cors({
+    origin(origin, cb) {
+      // allow non-browser requests (no Origin header)
+      if (!origin) return cb(null, true);
+
+      // allow exact matches
+      if (allowed.includes(origin)) return cb(null, true);
+
+      // allow Vercel preview deployments: https://xxx-yyy.vercel.app
+      if (/^https:\/\/.+\.vercel\.app$/.test(origin)) return cb(null, true);
+
+      return cb(new Error(`CORS blocked for origin: ${origin}`));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-api-key", "x-user-id", "x-kb-id"],
+  })
+);
+
+app.set("trust proxy", 1);
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
