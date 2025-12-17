@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc && npm run copy-assets",
-    "copy-assets": "mkdir -p dist/prompts && cp -r src/prompts/*.md dist/prompts/",
+    "copy-assets": "mkdir -p dist/agents/prompts && cp -r src/agents/prompts/*.md dist/agents/prompts/",
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "watch": "tsc --watch",

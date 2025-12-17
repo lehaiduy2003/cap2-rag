@@ -4,7 +4,11 @@
  */
 
 import { Router, Request, Response } from "express";
-import { runOrchestrator, getSessionHistory, clearSessionMemory } from "../orchestratorAgent";
+import {
+  runOrchestrator,
+  getSessionHistory,
+  clearSessionMemory,
+} from "../agents";
 
 /**
  * Create chat routes
