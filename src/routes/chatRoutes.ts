@@ -21,8 +21,13 @@ export function createChatRoutes(): Router {
     try {
       const { message, session_id, property_id, owner_id, user_id } = req.body;
 
-      if (!message || !message.trim()) {
-        return res.status(400).json({ error: "Message is required" });
+      // Validate message
+      if (!message || typeof message !== "string" || !message.trim()) {
+        console.error("[RAG API] Invalid message:", { message, type: typeof message });
+        return res.status(400).json({
+          error: "Message is required and must be a non-empty string",
+          received: { message, type: typeof message },
+        });
       }
 
       if (!property_id && !owner_id) {
@@ -37,7 +42,10 @@ export function createChatRoutes(): Router {
         `${user_id || "guest"}-${property_id ? `property-${property_id}` : `owner-${owner_id}`}`;
 
       console.log(
-        `[RAG API] Chat request - Session: ${sessionId}, Property: ${property_id}, Owner: ${owner_id}`
+        `[RAG API] Chat request - Session: ${sessionId}, Property: ${property_id}, Owner: ${owner_id}, Message: "${message.substring(
+          0,
+          50
+        )}..."`
       );
 
       // Use orchestrator agent for intelligent tool selection

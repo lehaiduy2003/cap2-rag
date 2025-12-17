@@ -73,7 +73,7 @@ async function initializeRAGSystem(): Promise<boolean> {
 }
 
 // Middleware
-const allowed = ["http://localhost:3000", "https://cap2-fe.vercel.app"];
+const allowed = ["http://localhost:5173", "https://cap2-fe.vercel.app"];
 
 app.use(
   cors({

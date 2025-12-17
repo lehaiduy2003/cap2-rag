@@ -15,7 +15,7 @@ import * as path from "path";
 dotenv.config();
 
 const GOOGLE_API_KEY = process.env.GOOGLE_GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.0-flash";
 
 if (!GOOGLE_API_KEY) {
   throw new Error("GOOGLE_GEMINI_API_KEY is not set in environment variables");
@@ -27,9 +27,15 @@ let systemPrompt: string;
 
 try {
   systemPrompt = fs.readFileSync(SYSTEM_PROMPT_PATH, "utf-8");
+
+  // Validate that the system prompt is not empty
+  if (!systemPrompt || !systemPrompt.trim()) {
+    throw new Error("System prompt file is empty");
+  }
 } catch (error) {
   console.error("[Orchestrator] Failed to load system prompt:", (error as Error).message);
-  throw new Error("System prompt file not found");
+  console.error("[Orchestrator] Attempted path:", SYSTEM_PROMPT_PATH);
+  throw new Error(`System prompt file error: ${(error as Error).message}`);
 }
 
 // Memory storage for conversation sessions
@@ -79,6 +85,11 @@ export async function getSessionHistory(sessionId: string): Promise<any[]> {
  * Create the master orchestrator agent
  */
 async function createOrchestratorAgent(sessionId: string) {
+  // Validate API key
+  if (!GOOGLE_API_KEY) {
+    throw new Error("GOOGLE_GEMINI_API_KEY is not configured");
+  }
+
   // Initialize Gemini model with streaming disabled to avoid tool calling parsing issues
   const model = new ChatGoogleGenerativeAI({
     apiKey: GOOGLE_API_KEY,
@@ -90,6 +101,11 @@ async function createOrchestratorAgent(sessionId: string) {
 
   // Get or create memory for this session
   const memory = getSessionMemory(sessionId);
+
+  // Validate system prompt before creating template
+  if (!systemPrompt || !systemPrompt.trim()) {
+    throw new Error("System prompt is empty or not loaded");
+  }
 
   // Create the agent prompt
   const prompt = ChatPromptTemplate.fromMessages([
@@ -134,16 +150,43 @@ export async function runOrchestrator(
   sources?: any[];
 }> {
   try {
+    // Validate input
+    if (!userMessage || typeof userMessage !== "string" || !userMessage.trim()) {
+      throw new Error("Invalid or empty user message");
+    }
+
+    // Validate sessionId
+    if (!sessionId || typeof sessionId !== "string" || !sessionId.trim()) {
+      throw new Error("Invalid or empty session ID");
+    }
+
+    console.log(
+      `[Orchestrator] Processing message: "${userMessage.substring(
+        0,
+        50
+      )}..." for session: ${sessionId}`
+    );
+
     // Create agent for this session
     const executor = await createOrchestratorAgent(sessionId);
 
-    // Run the agent
-    const result = await executor.invoke({
-      input: userMessage,
+    // Prepare input object
+    const inputData = {
+      input: userMessage.trim(),
       property_id: propertyId || "Not specified",
       owner_id: ownerId || "Not specified",
       session_id: sessionId,
+    };
+
+    console.log(`[Orchestrator] Invoking with input:`, {
+      inputLength: inputData.input.length,
+      propertyId: inputData.property_id,
+      ownerId: inputData.owner_id,
+      sessionId: inputData.session_id,
     });
+
+    // Run the agent with validated inputs
+    const result = await executor.invoke(inputData);
 
     // Handle different types of output
     let responseText: string;
